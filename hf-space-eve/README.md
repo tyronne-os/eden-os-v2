@@ -1,5 +1,5 @@
 ---
-title: EVE HALLO4 TEST
+title: EVE - Talking Avatar
 emoji: 👩
 colorFrom: purple
 colorTo: indigo
@@ -8,17 +8,16 @@ sdk_version: 5.23.0
 app_file: app.py
 pinned: true
 license: mit
-hardware: l4x1
 ---
 
-# EVE - HALLO4 TEST
+# EVE - Talking Avatar
 
-Audio-driven portrait animation powered by **Hallo4** (SIGGRAPH Asia 2025).
+Audio-driven talking avatar powered by **Wav2Lip** + **Edge TTS**.
 
 ## Pipeline
-Text → Edge TTS (WAV) → Hallo4 (L4 GPU) → Animated Video
+Text → Edge TTS (WAV) → Wav2Lip (HF ZeroGPU) → Animated Video
 
 ## Credits
-- **Hallo4**: Fudan University Generative Vision Lab ([paper](https://arxiv.org/abs/2505.23525))
+- **Wav2Lip**: Rudrabha et al. (audio-driven lip sync)
+- **Hallo4**: Fudan University Generative Vision Lab (SIGGRAPH Asia 2025)
 - **Edge TTS**: Microsoft (en-US-AvaMultilingualNeural)
-- **EDEN OS V2**: Private self-healing avatar system

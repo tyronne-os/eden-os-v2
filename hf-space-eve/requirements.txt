@@ -1,9 +1,5 @@
-torch==2.5.1
-torchvision
-torchaudio
-gradio>=5.0
+gradio_client
 edge-tts
 soundfile
 opencv-python-headless
 numpy
-huggingface_hub
