@@ -1,27 +1,47 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 export default function AvatarView({ frame, useCssFallback, speaking }) {
-  if (useCssFallback || !frame) {
+  const [breathePhase, setBreathePhase] = useState(0);
+
+  // Subtle idle breathing animation on the reference image
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBreathePhase((p) => p + 1);
+    }, 50);
+    return () => clearInterval(interval);
+  }, []);
+
+  // If we have real pipeline frames, show them
+  if (frame && !useCssFallback) {
     return (
       <div className="avatar-container">
-        <div className={`avatar-fallback ${speaking ? "speaking" : ""}`}>
-          <div className="eyes">
-            <div className="eye" />
-            <div className="eye" />
-          </div>
-          <div className="mouth" />
-        </div>
+        <img
+          className="avatar-frame"
+          src={`data:image/jpeg;base64,${frame}`}
+          alt="Eve"
+        />
       </div>
     );
   }
 
+  // Eve's reference image with CSS animation (breathing, speaking)
+  const breatheScale = 1.0 + Math.sin(breathePhase * 0.03) * 0.004;
+  const breatheY = Math.sin(breathePhase * 0.02) * 1.5;
+  const speakScale = speaking ? 1.0 + Math.sin(breathePhase * 0.15) * 0.003 : 0;
+
   return (
     <div className="avatar-container">
-      <img
-        className="avatar-frame"
-        src={`data:image/jpeg;base64,${frame}`}
-        alt="Eve"
-      />
+      <div className="avatar-eve-wrapper">
+        <img
+          src="/eve-NATURAL.png"
+          alt="Eve"
+          className={`avatar-eve-live ${speaking ? "speaking" : ""}`}
+          style={{
+            transform: `scale(${breatheScale + speakScale}) translateY(${breatheY}px)`,
+          }}
+        />
+        <div className={`avatar-eve-aura ${speaking ? "speaking" : ""}`} />
+      </div>
     </div>
   );
 }

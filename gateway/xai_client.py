@@ -70,17 +70,24 @@ async def generate_greeting() -> str:
 
 async def text_to_speech(text: str) -> bytes:
     """Convert text to speech using xAI TTS with Eve voice."""
-    client = _get_client()
-    resp = await client.audio.speech.create(
-        model="grok-3-mini",  # xAI TTS model
-        voice=settings.eve_voice,
-        input=text,
-        response_format="wav",
-    )
-    audio_bytes = b""
-    async for chunk in resp.iter_bytes():
-        audio_bytes += chunk
-    return audio_bytes
+    import httpx as _httpx
+
+    # Use xAI's dedicated TTS endpoint
+    async with _httpx.AsyncClient(timeout=30.0) as http:
+        resp = await http.post(
+            "https://api.x.ai/v1/tts",
+            headers={
+                "Authorization": f"Bearer {settings.xai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": text,
+                "voice_id": settings.eve_voice,
+                "language": "en",
+            },
+        )
+        resp.raise_for_status()
+        return resp.content
 
 
 async def speech_to_text(audio_bytes: bytes) -> str:

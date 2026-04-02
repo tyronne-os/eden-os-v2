@@ -120,6 +120,8 @@ async def welcome():
         )
 
     # Route to animation pipeline (force_strong=True for greeting)
+    result = {}
+    frames = []
     try:
         result = await _route_animation(
             audio_bytes,
@@ -128,21 +130,21 @@ async def welcome():
         )
         frames = result.get("frames", [])
     except Exception as e:
-        logger.error(f"Animation routing failed: {e}")
-        frames = []
+        logger.error(f"Animation routing failed (expected without GPU): {e}")
 
     # Broadcast frames via WebSocket
     if frames:
         asyncio.create_task(_broadcast_frames(frames))
 
+    pipeline_used = result.get("pipeline_used", "css_fallback")
     elapsed = time.time() - t0
-    logger.info(f"Welcome completed in {elapsed:.1f}s — {len(frames)} frames, pipeline={result.get('pipeline_used', '?')}")
+    logger.info(f"Welcome completed in {elapsed:.1f}s — {len(frames)} frames, pipeline={pipeline_used}")
 
     return {
         "text": greeting_text,
         "audio_b64": base64.b64encode(audio_bytes).decode(),
         "frame_count": len(frames),
-        "pipeline_used": result.get("pipeline_used", "unknown"),
+        "pipeline_used": pipeline_used,
         "elapsed_s": round(elapsed, 2),
     }
 
