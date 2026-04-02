@@ -1,15 +1,25 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 export default function AvatarView({ frame, useCssFallback, speaking }) {
   const [breathePhase, setBreathePhase] = useState(0);
+  const breatheTimerRef = useRef(null);
 
-  // Subtle idle breathing animation on the reference image
+  // Only run breathing animation when in CSS fallback mode
   useEffect(() => {
-    const interval = setInterval(() => {
-      setBreathePhase((p) => p + 1);
-    }, 50);
-    return () => clearInterval(interval);
-  }, []);
+    if (useCssFallback) {
+      breatheTimerRef.current = setInterval(() => {
+        setBreathePhase((p) => p + 1);
+      }, 50);
+    } else {
+      if (breatheTimerRef.current) {
+        clearInterval(breatheTimerRef.current);
+        breatheTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (breatheTimerRef.current) clearInterval(breatheTimerRef.current);
+    };
+  }, [useCssFallback]);
 
   // If we have real pipeline frames, show them
   if (frame && !useCssFallback) {
@@ -19,6 +29,7 @@ export default function AvatarView({ frame, useCssFallback, speaking }) {
           className="avatar-frame"
           src={`data:image/jpeg;base64,${frame}`}
           alt="Eve"
+          draggable={false}
         />
       </div>
     );
@@ -39,6 +50,7 @@ export default function AvatarView({ frame, useCssFallback, speaking }) {
           style={{
             transform: `scale(${breatheScale + speakScale}) translateY(${breatheY}px)`,
           }}
+          draggable={false}
         />
         <div className={`avatar-eve-aura ${speaking ? "speaking" : ""}`} />
       </div>

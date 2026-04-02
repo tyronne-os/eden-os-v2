@@ -143,6 +143,7 @@ async def welcome():
     return {
         "text": greeting_text,
         "audio_b64": base64.b64encode(audio_bytes).decode(),
+        "frames": frames,  # Include frames in response for direct playback
         "frame_count": len(frames),
         "pipeline_used": pipeline_used,
         "elapsed_s": round(elapsed, 2),

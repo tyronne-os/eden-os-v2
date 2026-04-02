@@ -197,6 +197,16 @@ def compute_motion_score(frames_b64: list[str]) -> float:
 
 
 # ── Dual-Track Architecture ─────────────────────────────────────────────────
+def _reset_stale_failures():
+    """Reset pipelines that were marked failed during startup or transiently.
+    This allows recovery when a pipeline comes online after the router starts."""
+    for p in pipelines:
+        if p.status == PipelineStatus.FAILED and p.fail_count < 10:
+            p.status = PipelineStatus.COLD
+            p.fail_count = 0
+            logger.info(f"Reset stale failure for {p.name}")
+
+
 class MainPipeline:
     """Track 1: Always tries the smallest/fastest available pipeline."""
 
@@ -205,7 +215,13 @@ class MainPipeline:
         order = agent_order or SIZE_ORDER
         for pid in order:
             p = pipelines_by_id.get(pid)
-            if p and (p.status != PipelineStatus.FAILED or p.fail_count < 5):
+            if p and p.status != PipelineStatus.FAILED:
+                return p
+        # If all failed, reset and try again (recovery from startup failures)
+        _reset_stale_failures()
+        for pid in order:
+            p = pipelines_by_id.get(pid)
+            if p:
                 return p
         return None
 
@@ -221,8 +237,17 @@ class BackupRouter:
             if pid == exclude_pid:
                 continue
             p = pipelines_by_id.get(pid)
-            if p and (p.status != PipelineStatus.FAILED or p.fail_count < 5):
+            if p and p.status != PipelineStatus.FAILED:
                 result.append(p)
+        # If empty, reset failures and try again
+        if not result:
+            _reset_stale_failures()
+            for pid in order:
+                if pid == exclude_pid:
+                    continue
+                p = pipelines_by_id.get(pid)
+                if p:
+                    result.append(p)
         return result
 
 
