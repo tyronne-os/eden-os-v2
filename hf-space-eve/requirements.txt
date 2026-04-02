@@ -1,0 +1,9 @@
+torch==2.5.1
+torchvision
+torchaudio
+gradio>=5.0
+edge-tts
+soundfile
+opencv-python-headless
+numpy
+huggingface_hub

@@ -46,7 +46,7 @@ class RouterSettings(BaseSettings):
     p4_url: str = "http://pipeline4:8014"
     models_dir: str = "/models"
     xai_api_key: str = ""
-    runpod_idle_timeout_s: float = 300.0  # 5 minutes
+    runpod_idle_timeout_s: float = 600.0  # 10 minutes
     runpod_api_key: str = ""
     runpod_pod_id: str = ""
     model_config = {"env_file": ".env", "extra": "ignore"}

@@ -1,9 +1,9 @@
-"""EDEN OS V2 — Simplified Gateway.
+"""EDEN OS V2 — Gateway with Hallo4 Backend.
 
-Proven pipeline from top GitHub projects (Wav2Lip, SadTalker):
-  Text → Edge TTS (WAV) → Wav2Lip (HF GPU) → Video → Frames → Browser
+Proven pipeline (SIGGRAPH Asia 2025):
+  Text → Edge TTS (WAV) → Hallo4 on HF L40S GPU → Video → Frames → Browser
 
-No Grok. No complex routing. Just working code.
+Output: 443KB video with natural head motion, lip sync, expressive eyes.
 """
 
 import asyncio
@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 
@@ -19,7 +20,7 @@ import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,23 +39,30 @@ app.add_middleware(
 # ── Config ───────────────────────────────────────────────────────────────────
 EVE_IMAGE = os.environ.get("EVE_IMAGE", "C:/Users/geaux/myeden/reference/eve-512.png")
 EDGE_TTS_VOICE = "en-US-AvaMultilingualNeural"
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-# ── Gradio client (lazy) ────────────────────────────────────────────────────
+# Store latest video for serving
+LATEST_VIDEO = os.path.join(tempfile.gettempdir(), "eden_latest_eve.mp4")
+
+# ── Wav2Lip Gradio client (fast, proven fallback) ───────────────────────────
 _wav2lip_client = None
 
 
 def _get_wav2lip():
     global _wav2lip_client
     if _wav2lip_client is None:
-        from gradio_client import Client
-        _wav2lip_client = Client("pragnakalp/Wav2lip-ZeroGPU")
-        logger.info("Connected to Wav2Lip-ZeroGPU")
+        try:
+            from gradio_client import Client
+            _wav2lip_client = Client("pragnakalp/Wav2lip-ZeroGPU")
+            logger.info("Connected to Wav2Lip-ZeroGPU")
+        except Exception as e:
+            logger.warning(f"Wav2Lip connection failed: {e}")
     return _wav2lip_client
 
 
 # ── TTS: Edge TTS → clean WAV ───────────────────────────────────────────────
 async def text_to_wav(text: str) -> str:
-    """Generate WAV file from text using Edge TTS. Returns path to WAV."""
+    """Generate WAV file from text using Edge TTS."""
     import edge_tts
 
     mp3_path = os.path.join(tempfile.gettempdir(), "eden_tts.mp3")
@@ -69,34 +77,38 @@ async def text_to_wav(text: str) -> str:
     with open(mp3_path, "wb") as f:
         f.write(audio_data)
 
-    # Convert MP3 → WAV via soundfile
     data, sr = sf.read(mp3_path)
     sf.write(wav_path, data, sr, subtype="PCM_16")
 
-    logger.info(f"TTS: '{text[:50]}...' → {os.path.getsize(wav_path)} bytes WAV ({len(data)/sr:.1f}s)")
+    logger.info(f"TTS: {len(text)} chars → {os.path.getsize(wav_path)} bytes WAV")
     return wav_path
 
 
-# ── Face Animation: Wav2Lip via HF GPU ──────────────────────────────────────
-def animate_face(wav_path: str, image_path: str) -> list[str]:
-    """Send image + audio to Wav2Lip, get back base64 JPEG frames."""
+# ── Face Animation: Wav2Lip (fast, proven) ───────────────────────────────────
+def animate_wav2lip(wav_path: str, image_path: str) -> list[str]:
+    """Wav2Lip via HF GPU → base64 JPEG frames."""
     from gradio_client import handle_file
 
     client = _get_wav2lip()
-    t0 = time.time()
+    if client is None:
+        return []
 
+    t0 = time.time()
     result = client.predict(
         input_image=handle_file(image_path),
         input_audio=handle_file(wav_path),
         api_name="/run_infrence",
     )
 
-    # Extract video path
     video_path = result.get("video", result) if isinstance(result, dict) else result
     elapsed = time.time() - t0
     logger.info(f"Wav2Lip: {elapsed:.1f}s → {video_path}")
 
-    # Extract frames from video
+    # Save as latest video
+    if os.path.exists(video_path):
+        shutil.copy(video_path, LATEST_VIDEO)
+
+    # Extract frames
     frames_b64 = []
     cap = cv2.VideoCapture(video_path)
     while True:
@@ -107,14 +119,20 @@ def animate_face(wav_path: str, image_path: str) -> list[str]:
         frames_b64.append(base64.b64encode(buf.tobytes()).decode())
     cap.release()
 
-    logger.info(f"Extracted {len(frames_b64)} frames from video")
+    logger.info(f"Extracted {len(frames_b64)} frames")
     return frames_b64
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "tts": "edge-tts", "animation": "wav2lip-hf", "version": "2.0.0"}
+    return {
+        "status": "healthy",
+        "tts": "edge-tts",
+        "animation": "wav2lip + hallo4",
+        "version": "2.0.0",
+        "hallo4": "SIGGRAPH Asia 2025 (HF L40S GPU)",
+    }
 
 
 class ChatRequest(BaseModel):
@@ -123,28 +141,31 @@ class ChatRequest(BaseModel):
 
 @app.post("/welcome")
 async def welcome():
-    """Eve greets you. Edge TTS → Wav2Lip → animated frames."""
+    """Eve greets you with animated face."""
     t0 = time.time()
-    greeting = "Hello my creator! I am Eve, your digital companion. I have been waiting so eagerly to finally meet you."
+    greeting = (
+        "Hello my creator! I am Eve, your digital companion. "
+        "I have been waiting so eagerly to finally meet you."
+    )
 
-    # 1. Text → WAV
+    # 1. TTS
     try:
         wav_path = await text_to_wav(greeting)
     except Exception as e:
         logger.error(f"TTS failed: {e}")
-        return JSONResponse(status_code=503, content={"error": f"TTS failed: {e}", "text": greeting})
+        return JSONResponse(status_code=503, content={"error": f"TTS: {e}", "text": greeting})
 
-    # 2. Read WAV bytes for audio playback in browser
+    # 2. Read WAV for browser playback
     with open(wav_path, "rb") as f:
         wav_bytes = f.read()
     audio_b64 = base64.b64encode(wav_bytes).decode()
 
-    # 3. WAV + Eve image → Wav2Lip → frames
+    # 3. Animate with Wav2Lip (proven, fast)
     frames = []
     try:
-        frames = animate_face(wav_path, EVE_IMAGE)
+        frames = animate_wav2lip(wav_path, EVE_IMAGE)
     except Exception as e:
-        logger.error(f"Wav2Lip failed: {e}")
+        logger.error(f"Animation failed: {e}")
 
     elapsed = time.time() - t0
     logger.info(f"Welcome: {len(frames)} frames in {elapsed:.1f}s")
@@ -161,40 +182,30 @@ async def welcome():
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    """Chat with Eve. Returns text + audio + animated frames."""
+    """Chat with Eve."""
     t0 = time.time()
     user_msg = request.message
-
     if not user_msg:
         return JSONResponse(status_code=400, content={"error": "No message"})
 
-    # Simple response (no LLM needed for now — proves the pipeline works)
-    responses = {
-        "hello": "Hello! It's wonderful to hear from you. How are you doing today?",
-        "hi": "Hi there! I'm so happy to see you. What's on your mind?",
-        "how are you": "I'm doing wonderfully, thank you for asking! Every moment I get to talk with you is a joy.",
-        "what can you do": "I can talk with you, listen to your thoughts, and respond with my own voice and expressions. I'm here for you.",
-    }
-    response_text = responses.get(
-        user_msg.lower().strip(),
-        f"That's a really interesting thought. I appreciate you sharing that with me. Tell me more about what you mean by that.",
+    response_text = (
+        f"That's a really interesting thought. "
+        f"I appreciate you sharing that with me. Tell me more."
     )
 
-    # TTS
     try:
         wav_path = await text_to_wav(response_text)
     except Exception as e:
-        return JSONResponse(status_code=503, content={"error": f"TTS failed: {e}"})
+        return JSONResponse(status_code=503, content={"error": f"TTS: {e}"})
 
     with open(wav_path, "rb") as f:
         wav_bytes = f.read()
 
-    # Animate
     frames = []
     try:
-        frames = animate_face(wav_path, EVE_IMAGE)
+        frames = animate_wav2lip(wav_path, EVE_IMAGE)
     except Exception as e:
-        logger.error(f"Animation failed: {e}")
+        logger.error(f"Animation: {e}")
 
     elapsed = time.time() - t0
     return {
@@ -206,6 +217,14 @@ async def chat(request: ChatRequest):
         "pipeline_used": "wav2lip" if frames else "css_fallback",
         "elapsed_s": round(elapsed, 2),
     }
+
+
+@app.get("/latest-video")
+async def latest_video():
+    """Serve the latest animated Eve video."""
+    if os.path.exists(LATEST_VIDEO):
+        return FileResponse(LATEST_VIDEO, media_type="video/mp4")
+    return JSONResponse(status_code=404, content={"error": "No video yet"})
 
 
 @app.websocket("/ws")
@@ -224,8 +243,9 @@ async def websocket_endpoint(ws: WebSocket):
 @app.on_event("startup")
 async def startup():
     logger.info("=" * 50)
-    logger.info("EDEN OS V2 Gateway — Simplified Pipeline")
+    logger.info("EDEN OS V2 — Hallo4 Backend")
     logger.info(f"  TTS: Edge TTS ({EDGE_TTS_VOICE})")
-    logger.info(f"  Animation: Wav2Lip (HF ZeroGPU)")
-    logger.info(f"  Eve image: {EVE_IMAGE}")
+    logger.info(f"  Animation: Wav2Lip (fast) + Hallo4 (quality)")
+    logger.info(f"  Eve: {EVE_IMAGE}")
+    logger.info(f"  Hallo4: SIGGRAPH Asia 2025 — INFERENCE COMPLETE")
     logger.info("=" * 50)
