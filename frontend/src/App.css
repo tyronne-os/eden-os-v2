@@ -110,7 +110,112 @@
   50% { opacity: 1; }
 }
 
-/* ── Avatar View ────────────────────────────────────────────── */
+/* ── Eve Alive — Always-alive idle animation ───────────────── */
+.eve-alive-container {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0f;
+  overflow: hidden;
+}
+
+.eve-alive-idle-layer,
+.eve-alive-frame-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.4s ease;
+}
+
+.eve-alive-image-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 90%;
+  max-height: 90vh;
+}
+
+.eve-alive-image {
+  max-width: 100%;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 12px;
+  will-change: transform;
+  transform-origin: center 40%; /* pivot near the eyes/chest */
+  box-shadow: 0 0 40px rgba(167, 139, 250, 0.1);
+}
+
+.eve-alive-image.eve-alive-speaking {
+  box-shadow: 0 0 60px rgba(167, 139, 250, 0.25),
+              0 0 120px rgba(167, 139, 250, 0.1);
+}
+
+/* Blink overlay — dark gradient that covers the eye region */
+.eve-blink-overlay {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 40%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(30, 20, 15, 0.92) 0%,
+    rgba(50, 35, 30, 0.7) 40%,
+    transparent 75%
+  );
+  /* Matches Eve's skin tone shadow when eyelids close */
+  will-change: opacity;
+  z-index: 2;
+}
+
+/* Jaw micro-movement overlay — subtle shadow under the mouth */
+.eve-jaw-overlay {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0.12) 0%,
+    transparent 70%
+  );
+  will-change: transform, opacity;
+  z-index: 2;
+}
+
+/* Ambient aura glow behind Eve */
+.eve-alive-aura {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 105%;
+  height: 105%;
+  border-radius: 12px;
+  background: radial-gradient(ellipse, rgba(167, 139, 250, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+  transition: opacity 0.3s;
+  opacity: 0.5;
+  z-index: 0;
+}
+
+.eve-alive-aura.speaking {
+  opacity: 1;
+  background: radial-gradient(ellipse, rgba(167, 139, 250, 0.08) 0%, transparent 70%);
+}
+
+/* Pipeline frame display */
+.eve-alive-frame {
+  max-width: 90%;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+/* Legacy avatar classes kept for backward compat */
 .avatar-container {
   grid-column: 1;
   grid-row: 1;
@@ -127,46 +232,6 @@
   max-height: 100%;
   object-fit: contain;
   border-radius: 8px;
-}
-
-/* ── Eve Live Avatar (reference image with CSS animation) ────── */
-.avatar-eve-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.avatar-eve-live {
-  max-width: 90%;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 12px;
-  transition: transform 0.05s ease-out;
-  box-shadow: 0 0 40px rgba(167, 139, 250, 0.1);
-}
-
-.avatar-eve-live.speaking {
-  box-shadow: 0 0 60px rgba(167, 139, 250, 0.25), 0 0 120px rgba(167, 139, 250, 0.1);
-}
-
-.avatar-eve-aura {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 105%;
-  height: 105%;
-  border-radius: 12px;
-  background: radial-gradient(ellipse, rgba(167, 139, 250, 0.04) 0%, transparent 70%);
-  pointer-events: none;
-  transition: opacity 0.3s;
-  opacity: 0.5;
-}
-
-.avatar-eve-aura.speaking {
-  opacity: 1;
-  background: radial-gradient(ellipse, rgba(167, 139, 250, 0.08) 0%, transparent 70%);
 }
 
 @keyframes breathe {

@@ -1,8 +1,7 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { useAudioRecorder } from "./hooks/useAudioRecorder.js";
-import SplashScreen from "./components/SplashScreen.jsx";
-import AvatarView from "./components/AvatarView.jsx";
+import EveAlive from "./components/EveAlive.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import "./App.css";
@@ -11,20 +10,18 @@ const API_BASE = "/api";
 const FRAME_INTERVAL_MS = 1000 / 30; // 30fps = ~33.3ms per frame
 
 export default function App() {
-  const [started, setStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(null);
   const [messages, setMessages] = useState([]);
   const [pipelineInfo, setPipelineInfo] = useState(null);
-  const [error, setError] = useState(null);
-  const [useCssFallback, setUseCssFallback] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   // Ref to cancel any in-progress frame animation
   const animationRef = useRef(null);
 
-  // WebSocket for real-time frame streaming
+  // WebSocket connects immediately — no click needed
   const { connected, lastFrame } = useWebSocket(
-    started ? `ws://${window.location.host}/ws` : null,
+    `ws://${window.location.host}/ws`,
     (frame) => setCurrentFrame(frame)
   );
 
@@ -43,7 +40,11 @@ export default function App() {
     }
 
     let cancelled = false;
-    const cancel = () => { cancelled = true; };
+    const cancel = () => {
+      cancelled = true;
+      setSpeaking(false);
+      setCurrentFrame(null); // return to idle alive
+    };
     animationRef.current = cancel;
 
     // Prepare audio element (if present)
@@ -55,7 +56,7 @@ export default function App() {
     }
 
     if (frames && frames.length > 0) {
-      setUseCssFallback(false);
+      setSpeaking(true);
       // Show first frame immediately
       setCurrentFrame(frames[0]);
 
@@ -86,53 +87,63 @@ export default function App() {
         if (frameIdx < frames.length - 1) {
           requestAnimationFrame(tick);
         } else {
-          // Animation done — switch to CSS fallback for idle breathing
+          // Animation done — return to idle alive
           animationRef.current = null;
-          setUseCssFallback(true);
+          setSpeaking(false);
+          setCurrentFrame(null);
         }
       };
 
       requestAnimationFrame(tick);
     } else {
-      // No frames — just play audio and show CSS fallback
-      setUseCssFallback(true);
-      if (audio) audio.play().catch(() => {});
+      // No frames — just play audio, Eve stays alive in idle
+      setSpeaking(true);
+      if (audio) {
+        audio.play().catch(() => {});
+        audio.addEventListener("ended", () => setSpeaking(false));
+        // Fallback timeout in case ended event doesn't fire
+        setTimeout(() => setSpeaking(false), 15000);
+      } else {
+        setSpeaking(false);
+      }
     }
 
     return cancel;
   }, []);
 
-  const handleStart = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await fetch(`${API_BASE}/welcome`, { method: "POST" });
-      const data = await resp.json();
+  // ── Auto-welcome on mount (no click needed) ──────────────────
+  const welcomeSent = useRef(false);
+  useEffect(() => {
+    if (welcomeSent.current) return;
+    welcomeSent.current = true;
 
-      if (data.text) {
-        setMessages([{ role: "eve", text: data.text }]);
+    (async () => {
+      setLoading(true);
+      try {
+        const resp = await fetch(`${API_BASE}/welcome`, { method: "POST" });
+        const data = await resp.json();
+
+        if (data.text) {
+          setMessages([{ role: "eve", text: data.text }]);
+        }
+
+        setPipelineInfo({
+          pipeline: data.pipeline_used,
+          frames: data.frame_count,
+          elapsed: data.elapsed_s,
+        });
+
+        playFramesWithAudio(
+          data.frame_count > 0 ? data.frames : null,
+          data.audio_b64
+        );
+      } catch (e) {
+        // Welcome failed — Eve is still alive and idle, just no greeting
+        console.warn("Welcome fetch failed:", e.message);
+      } finally {
+        setLoading(false);
       }
-
-      setPipelineInfo({
-        pipeline: data.pipeline_used,
-        frames: data.frame_count,
-        elapsed: data.elapsed_s,
-      });
-
-      // Play frames + audio simultaneously
-      playFramesWithAudio(
-        data.frame_count > 0 ? data.frames : null,
-        data.audio_b64
-      );
-
-      setStarted(true);
-    } catch (e) {
-      setError(`Connection failed: ${e.message}`);
-      setUseCssFallback(true);
-      setStarted(true);
-    } finally {
-      setLoading(false);
-    }
+    })();
   }, [playFramesWithAudio]);
 
   const handleSendMessage = useCallback(async (text) => {
@@ -157,7 +168,6 @@ export default function App() {
         elapsed: data.elapsed_s,
       });
 
-      // Play frames + audio simultaneously (works for chat responses too)
       playFramesWithAudio(
         data.frame_count > 0 ? data.frames : null,
         data.audio_b64
@@ -186,7 +196,6 @@ export default function App() {
           setMessages((prev) => [...prev, { role: "eve", text: data.response }]);
         }
 
-        // Play frames + audio simultaneously for voice responses too
         playFramesWithAudio(
           data.frame_count > 0 ? data.frames : null,
           data.audio_b64
@@ -201,16 +210,12 @@ export default function App() {
     }
   }, [recording, startRecording, stopRecording, playFramesWithAudio]);
 
-  if (!started) {
-    return <SplashScreen onStart={handleStart} loading={loading} error={error} />;
-  }
-
+  // No splash screen — Eve is alive from frame zero
   return (
     <div className="eden-app">
-      <AvatarView
+      <EveAlive
         frame={currentFrame}
-        useCssFallback={useCssFallback}
-        speaking={loading}
+        speaking={speaking || loading}
       />
       <ChatPanel
         messages={messages}
@@ -222,7 +227,7 @@ export default function App() {
       <StatusBar
         connected={connected}
         pipeline={pipelineInfo}
-        cssFallback={useCssFallback}
+        cssFallback={!currentFrame}
       />
     </div>
   );
