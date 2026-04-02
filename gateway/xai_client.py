@@ -1,7 +1,18 @@
-"""xAI Grok-4 chat + TTS client using OpenAI-compatible API."""
+"""EDEN OS V2 — xAI Grok-4 chat + Edge TTS voice client.
 
+Brain: xAI Grok-4 (via OpenAI-compatible API)
+Voice: Microsoft Edge TTS (en-US-AvaMultilingualNeural) — outputs clean WAV
+"""
+
+import asyncio
 import io
 import logging
+import os
+import tempfile
+import wave
+
+import soundfile as sf
+import numpy as np
 from openai import AsyncOpenAI
 
 from .config import settings
@@ -9,6 +20,9 @@ from .config import settings
 logger = logging.getLogger("eden.xai")
 
 _client: AsyncOpenAI | None = None
+
+# Edge TTS voice (warm, natural female)
+EDGE_TTS_VOICE = "en-US-AvaMultilingualNeural"
 
 
 def _get_client() -> AsyncOpenAI:
@@ -69,25 +83,44 @@ async def generate_greeting() -> str:
 
 
 async def text_to_speech(text: str) -> bytes:
-    """Convert text to speech using xAI TTS with Eve voice."""
-    import httpx as _httpx
+    """Convert text to speech using Edge TTS.
 
-    # Use xAI's dedicated TTS endpoint
-    async with _httpx.AsyncClient(timeout=30.0) as http:
-        resp = await http.post(
-            "https://api.x.ai/v1/tts",
-            headers={
-                "Authorization": f"Bearer {settings.xai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "text": text,
-                "voice_id": settings.eve_voice,
-                "language": "en",
-            },
-        )
-        resp.raise_for_status()
-        return resp.content
+    Returns clean 16-bit mono WAV bytes at 24kHz.
+    Edge TTS produces natural-sounding speech with zero API cost.
+    """
+    try:
+        import edge_tts
+    except ImportError:
+        logger.error("edge_tts not installed — run: uv pip install edge-tts")
+        raise RuntimeError("edge_tts not installed")
+
+    # Generate audio via Edge TTS
+    communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+
+    # Collect MP3 chunks
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+
+    if not audio_data:
+        raise RuntimeError("Edge TTS returned empty audio")
+
+    # Convert MP3 → WAV using soundfile
+    mp3_path = os.path.join(tempfile.gettempdir(), "eden_edge_tts.mp3")
+    wav_path = os.path.join(tempfile.gettempdir(), "eden_edge_tts.wav")
+
+    with open(mp3_path, "wb") as f:
+        f.write(audio_data)
+
+    data, sr = sf.read(mp3_path)
+    sf.write(wav_path, data, sr, subtype="PCM_16")
+
+    with open(wav_path, "rb") as f:
+        wav_bytes = f.read()
+
+    logger.info(f"Edge TTS: {len(text)} chars → {len(wav_bytes)} bytes WAV ({len(data)/sr:.1f}s)")
+    return wav_bytes
 
 
 async def speech_to_text(audio_bytes: bytes) -> str:
