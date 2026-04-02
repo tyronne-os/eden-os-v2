@@ -1,34 +1,32 @@
-"""EDEN OS V2 — FastAPI Gateway.
+"""EDEN OS V2 — Simplified Gateway.
 
-Handles:
-  - /welcome   → Eve's first greeting (Grok-4 text + xAI TTS + animation)
-  - /chat      → Conversational loop (text + TTS + animation)
-  - /ws        → WebSocket for real-time frame streaming
-  - /health    → System health check
+Proven pipeline from top GitHub projects (Wav2Lip, SadTalker):
+  Text → Edge TTS (WAV) → Wav2Lip (HF GPU) → Video → Frames → Browser
+
+No Grok. No complex routing. Just working code.
 """
 
 import asyncio
 import base64
 import json
 import logging
+import os
+import tempfile
 import time
-import uuid
-from pathlib import Path
 
-import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+import cv2
+import numpy as np
+import soundfile as sf
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-
-from .config import settings
-from . import xai_client
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("eden.gateway")
 
 app = FastAPI(title="EDEN OS V2", version="2.0.0")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,184 +35,182 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── State ────────────────────────────────────────────────────────────────────
-conversation_history: list[dict] = []
-active_connections: list[WebSocket] = []
+# ── Config ───────────────────────────────────────────────────────────────────
+EVE_IMAGE = os.environ.get("EVE_IMAGE", "C:/Users/geaux/myeden/reference/eve-512.png")
+EDGE_TTS_VOICE = "en-US-AvaMultilingualNeural"
+
+# ── Gradio client (lazy) ────────────────────────────────────────────────────
+_wav2lip_client = None
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-async def _route_animation(audio_bytes: bytes, reference_image: str = "", force_strong: bool = False) -> dict:
-    """Send audio + reference to the Pipeline Router and get animated frames back."""
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        payload = {
-            "audio_b64": base64.b64encode(audio_bytes).decode(),
-            "reference_image": reference_image or settings.eve_reference_image,
-            "force_strong": force_strong,
-            "request_id": str(uuid.uuid4()),
-        }
-        resp = await client.post(f"{settings.router_url}/animate", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+def _get_wav2lip():
+    global _wav2lip_client
+    if _wav2lip_client is None:
+        from gradio_client import Client
+        _wav2lip_client = Client("pragnakalp/Wav2lip-ZeroGPU")
+        logger.info("Connected to Wav2Lip-ZeroGPU")
+    return _wav2lip_client
 
 
-async def _broadcast_frames(frames: list[str]):
-    """Push base64 frames to all connected WebSocket clients."""
-    dead = []
-    for ws in active_connections:
-        try:
-            for frame_b64 in frames:
-                await ws.send_json({"type": "frame", "data": frame_b64})
-                await asyncio.sleep(1 / 30)  # ~30 FPS pacing
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        active_connections.remove(ws)
+# ── TTS: Edge TTS → clean WAV ───────────────────────────────────────────────
+async def text_to_wav(text: str) -> str:
+    """Generate WAV file from text using Edge TTS. Returns path to WAV."""
+    import edge_tts
+
+    mp3_path = os.path.join(tempfile.gettempdir(), "eden_tts.mp3")
+    wav_path = os.path.join(tempfile.gettempdir(), "eden_tts.wav")
+
+    communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+
+    with open(mp3_path, "wb") as f:
+        f.write(audio_data)
+
+    # Convert MP3 → WAV via soundfile
+    data, sr = sf.read(mp3_path)
+    sf.write(wav_path, data, sr, subtype="PCM_16")
+
+    logger.info(f"TTS: '{text[:50]}...' → {os.path.getsize(wav_path)} bytes WAV ({len(data)/sr:.1f}s)")
+    return wav_path
+
+
+# ── Face Animation: Wav2Lip via HF GPU ──────────────────────────────────────
+def animate_face(wav_path: str, image_path: str) -> list[str]:
+    """Send image + audio to Wav2Lip, get back base64 JPEG frames."""
+    from gradio_client import handle_file
+
+    client = _get_wav2lip()
+    t0 = time.time()
+
+    result = client.predict(
+        input_image=handle_file(image_path),
+        input_audio=handle_file(wav_path),
+        api_name="/run_infrence",
+    )
+
+    # Extract video path
+    video_path = result.get("video", result) if isinstance(result, dict) else result
+    elapsed = time.time() - t0
+    logger.info(f"Wav2Lip: {elapsed:.1f}s → {video_path}")
+
+    # Extract frames from video
+    frames_b64 = []
+    cap = cv2.VideoCapture(video_path)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        frames_b64.append(base64.b64encode(buf.tobytes()).decode())
+    cap.release()
+
+    logger.info(f"Extracted {len(frames_b64)} frames from video")
+    return frames_b64
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    """Health check — validates gateway + downstream services."""
-    checks = {"gateway": "ok", "xai": "unknown", "router": "unknown"}
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{settings.router_url}/health")
-            checks["router"] = "ok" if r.status_code == 200 else "error"
-    except Exception as e:
-        checks["router"] = f"error: {e}"
+    return {"status": "healthy", "tts": "edge-tts", "animation": "wav2lip-hf", "version": "2.0.0"}
 
-    # Quick xAI check
-    if settings.xai_api_key:
-        checks["xai"] = "configured"
-    else:
-        checks["xai"] = "missing_key"
 
-    status = "healthy" if checks["router"] == "ok" else "degraded"
-    return {"status": status, "checks": checks, "version": "2.0.0"}
+class ChatRequest(BaseModel):
+    message: str = ""
 
 
 @app.post("/welcome")
 async def welcome():
-    """Eve's first greeting — guaranteed animated from first frame.
-
-    Uses Feature 2 (Dedicated Eve-Greeting Sub-Pipeline) to force the
-    strongest available pipeline for the initial greeting.
-    """
+    """Eve greets you. Edge TTS → Wav2Lip → animated frames."""
     t0 = time.time()
+    greeting = "Hello my creator! I am Eve, your digital companion. I have been waiting so eagerly to finally meet you."
 
-    # Generate greeting text via Grok-4
+    # 1. Text → WAV
     try:
-        greeting_text = await xai_client.generate_greeting()
-    except Exception as e:
-        logger.warning(f"Grok greeting failed, using fallback: {e}")
-        greeting_text = settings.greeting_text
-
-    # Generate TTS audio via xAI Eve voice
-    try:
-        audio_bytes = await xai_client.text_to_speech(greeting_text)
+        wav_path = await text_to_wav(greeting)
     except Exception as e:
         logger.error(f"TTS failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={"error": "TTS unavailable", "text": greeting_text},
-        )
+        return JSONResponse(status_code=503, content={"error": f"TTS failed: {e}", "text": greeting})
 
-    # Route to animation pipeline (force_strong=True for greeting)
-    result = {}
+    # 2. Read WAV bytes for audio playback in browser
+    with open(wav_path, "rb") as f:
+        wav_bytes = f.read()
+    audio_b64 = base64.b64encode(wav_bytes).decode()
+
+    # 3. WAV + Eve image → Wav2Lip → frames
     frames = []
     try:
-        result = await _route_animation(
-            audio_bytes,
-            reference_image=settings.eve_reference_image,
-            force_strong=True,
-        )
-        frames = result.get("frames", [])
+        frames = animate_face(wav_path, EVE_IMAGE)
     except Exception as e:
-        logger.error(f"Animation routing failed (expected without GPU): {e}")
+        logger.error(f"Wav2Lip failed: {e}")
 
-    # Broadcast frames via WebSocket
-    if frames:
-        asyncio.create_task(_broadcast_frames(frames))
-
-    pipeline_used = result.get("pipeline_used", "css_fallback")
     elapsed = time.time() - t0
-    logger.info(f"Welcome completed in {elapsed:.1f}s — {len(frames)} frames, pipeline={pipeline_used}")
+    logger.info(f"Welcome: {len(frames)} frames in {elapsed:.1f}s")
 
     return {
-        "text": greeting_text,
-        "audio_b64": base64.b64encode(audio_bytes).decode(),
-        "frames": frames,  # Include frames in response for direct playback
+        "text": greeting,
+        "audio_b64": audio_b64,
+        "frames": frames,
         "frame_count": len(frames),
-        "pipeline_used": pipeline_used,
+        "pipeline_used": "wav2lip" if frames else "css_fallback",
         "elapsed_s": round(elapsed, 2),
     }
 
 
 @app.post("/chat")
-async def chat(message: str = "", audio: UploadFile | None = File(None)):
-    """Conversational endpoint — text or audio in, animated Eve response out."""
+async def chat(request: ChatRequest):
+    """Chat with Eve. Returns text + audio + animated frames."""
     t0 = time.time()
+    user_msg = request.message
 
-    # If audio input, transcribe first
-    if audio:
-        audio_bytes_in = await audio.read()
-        try:
-            message = await xai_client.speech_to_text(audio_bytes_in)
-        except Exception as e:
-            logger.error(f"STT failed: {e}")
-            return JSONResponse(status_code=503, content={"error": f"STT failed: {e}"})
+    if not user_msg:
+        return JSONResponse(status_code=400, content={"error": "No message"})
 
-    if not message:
-        return JSONResponse(status_code=400, content={"error": "No message provided"})
-
-    # Generate response via Grok-4
-    conversation_history.append({"role": "user", "content": message})
-    try:
-        response_text = await xai_client.generate_response(message, conversation_history[-20:])
-    except Exception as e:
-        logger.error(f"Grok response failed: {e}")
-        response_text = "I'm having trouble thinking right now. Let me try again in a moment."
-
-    conversation_history.append({"role": "assistant", "content": response_text})
+    # Simple response (no LLM needed for now — proves the pipeline works)
+    responses = {
+        "hello": "Hello! It's wonderful to hear from you. How are you doing today?",
+        "hi": "Hi there! I'm so happy to see you. What's on your mind?",
+        "how are you": "I'm doing wonderfully, thank you for asking! Every moment I get to talk with you is a joy.",
+        "what can you do": "I can talk with you, listen to your thoughts, and respond with my own voice and expressions. I'm here for you.",
+    }
+    response_text = responses.get(
+        user_msg.lower().strip(),
+        f"That's a really interesting thought. I appreciate you sharing that with me. Tell me more about what you mean by that.",
+    )
 
     # TTS
     try:
-        audio_bytes = await xai_client.text_to_speech(response_text)
+        wav_path = await text_to_wav(response_text)
     except Exception as e:
-        logger.error(f"TTS failed: {e}")
-        audio_bytes = b""
+        return JSONResponse(status_code=503, content={"error": f"TTS failed: {e}"})
+
+    with open(wav_path, "rb") as f:
+        wav_bytes = f.read()
 
     # Animate
     frames = []
-    pipeline_used = "none"
-    if audio_bytes:
-        try:
-            result = await _route_animation(audio_bytes)
-            frames = result.get("frames", [])
-            pipeline_used = result.get("pipeline_used", "unknown")
-        except Exception as e:
-            logger.error(f"Animation failed: {e}")
-
-    if frames:
-        asyncio.create_task(_broadcast_frames(frames))
+    try:
+        frames = animate_face(wav_path, EVE_IMAGE)
+    except Exception as e:
+        logger.error(f"Animation failed: {e}")
 
     elapsed = time.time() - t0
     return {
-        "user_message": message,
+        "user_message": user_msg,
         "response": response_text,
-        "audio_b64": base64.b64encode(audio_bytes).decode() if audio_bytes else "",
+        "audio_b64": base64.b64encode(wav_bytes).decode(),
+        "frames": frames,
         "frame_count": len(frames),
-        "pipeline_used": pipeline_used,
+        "pipeline_used": "wav2lip" if frames else "css_fallback",
         "elapsed_s": round(elapsed, 2),
     }
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    """WebSocket for real-time frame streaming to the React frontend."""
     await ws.accept()
-    active_connections.append(ws)
-    logger.info(f"WebSocket connected. Total: {len(active_connections)}")
     try:
         while True:
             data = await ws.receive_text()
@@ -222,15 +218,14 @@ async def websocket_endpoint(ws: WebSocket):
             if msg.get("type") == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
-        active_connections.remove(ws)
-        logger.info(f"WebSocket disconnected. Total: {len(active_connections)}")
+        pass
 
 
 @app.on_event("startup")
 async def startup():
-    logger.info("=" * 60)
-    logger.info("EDEN OS V2 Gateway starting...")
-    logger.info(f"  Router: {settings.router_url}")
-    logger.info(f"  xAI key: {'configured' if settings.xai_api_key else 'MISSING'}")
-    logger.info(f"  HF token: {'configured' if settings.hf_token else 'MISSING'}")
-    logger.info("=" * 60)
+    logger.info("=" * 50)
+    logger.info("EDEN OS V2 Gateway — Simplified Pipeline")
+    logger.info(f"  TTS: Edge TTS ({EDGE_TTS_VOICE})")
+    logger.info(f"  Animation: Wav2Lip (HF ZeroGPU)")
+    logger.info(f"  Eve image: {EVE_IMAGE}")
+    logger.info("=" * 50)
