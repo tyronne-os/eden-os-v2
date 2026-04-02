@@ -1,0 +1,27 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.2
+httpx==0.28.1
+openai==1.82.0
+huggingface_hub==0.30.2
+hf_xet==1.1.0
+safetensors==0.5.3
+numpy==2.2.3
+opencv-python-headless==4.11.0.86
+Pillow==11.1.0
+scipy==1.15.2
+tqdm==4.67.1
+pydantic==2.10.6
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+aiofiles==24.1.0
+mediapipe==0.10.21
+soundfile==0.13.1
+librosa==0.10.2.post1
+diffusers==0.33.1
+transformers==4.49.0
+accelerate==1.4.0
+torch>=2.5.1
+torchaudio>=2.5.1
+torchvision>=0.20.1
+# anthropic not needed — agents use Grok via openai SDK

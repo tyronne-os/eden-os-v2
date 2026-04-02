@@ -1,0 +1,189 @@
+version: "3.9"
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-shared-env: &shared-env
+  HF_TOKEN: ${HF_TOKEN}
+  HF_XET_HIGH_PERFORMANCE: "1"
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+  MODELS_DIR: /models
+  SHARED_DIR: /shared
+
+services:
+  # ── FastAPI Gateway ──────────────────────────────────────────────
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *shared-env
+      XAI_API_KEY: ${XAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ROUTER_URL: http://router:8100
+      WATCHDOG_URL: http://watchdog:8200
+    volumes:
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+      - memory:/shared/memory
+    depends_on:
+      router:
+        condition: service_started
+    command: >
+      uvicorn gateway.main:app
+      --host 0.0.0.0 --port 8000 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline Router ─────────────────────────────────────────────
+  router:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      P0_URL: http://pipeline0:8010
+      P1_URL: http://pipeline1:8011
+      P2_URL: http://pipeline2:8012
+      P3_URL: http://pipeline3:8013
+      P4_URL: http://pipeline4:8014
+      XAI_API_KEY: ${XAI_API_KEY}
+      RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+      RUNPOD_POD_ID: ${RUNPOD_POD_ID:-}
+      RUNPOD_IDLE_TIMEOUT_S: ${RUNPOD_IDLE_TIMEOUT_S:-300}
+    volumes:
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    depends_on:
+      - pipeline0
+      - pipeline1
+      - pipeline2
+    command: >
+      uvicorn router.main:app
+      --host 0.0.0.0 --port 8100 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline 0: MuseTalk (Primary) ──────────────────────────────
+  pipeline0:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      PIPELINE_ID: "0"
+      PIPELINE_NAME: "musetalk"
+    volumes:
+      - models:/models
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    command: >
+      uvicorn pipelines.p0_musetalk.server:app
+      --host 0.0.0.0 --port 8010 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline 1: InfiniteTalk (Mid-tier) ─────────────────────────
+  pipeline1:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      PIPELINE_ID: "1"
+      PIPELINE_NAME: "infinitetalk"
+    volumes:
+      - models:/models
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    command: >
+      uvicorn pipelines.p1_infinitetalk.server:app
+      --host 0.0.0.0 --port 8011 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline 2: Ditto ───────────────────────────────────────────
+  pipeline2:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      PIPELINE_ID: "2"
+      PIPELINE_NAME: "ditto"
+    volumes:
+      - models:/models
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    command: >
+      uvicorn pipelines.p2_ditto.server:app
+      --host 0.0.0.0 --port 8012 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline 3: StableAvatar ────────────────────────────────────
+  pipeline3:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      PIPELINE_ID: "3"
+      PIPELINE_NAME: "stableavatar"
+    profiles: ["full"]
+    volumes:
+      - models:/models
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    command: >
+      uvicorn pipelines.p3_stableavatar.server:app
+      --host 0.0.0.0 --port 8013 --workers 1
+    restart: unless-stopped
+
+  # ── Pipeline 4: LiveAvatar 14B FP8 (Nuclear) ────────────────────
+  pipeline4:
+    build: .
+    <<: *gpu
+    environment:
+      <<: *shared-env
+      PIPELINE_ID: "4"
+      PIPELINE_NAME: "liveavatar"
+    profiles: ["full"]
+    volumes:
+      - models:/models
+      - frame-output:/shared/frames
+      - audio-queue:/shared/audio
+      - reference-images:/shared/reference
+    command: >
+      uvicorn pipelines.p4_liveavatar.server:app
+      --host 0.0.0.0 --port 8014 --workers 1
+    restart: unless-stopped
+
+  # ── Watchdog Sidecar ────────────────────────────────────────────
+  watchdog:
+    build: .
+    environment:
+      <<: *shared-env
+      ROUTER_URL: http://router:8100
+    volumes:
+      - frame-output:/shared/frames
+    command: >
+      uvicorn watchdog.main:app
+      --host 0.0.0.0 --port 8200 --workers 1
+    depends_on:
+      - router
+    restart: unless-stopped
+
+volumes:
+  models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${MODELS_PATH:-./models}
+  frame-output:
+  audio-queue:
+  reference-images:
+  memory:

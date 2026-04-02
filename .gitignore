@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+node_modules/
+frontend/dist/
+*.egg-info/
+.pytest_cache/
+models/
+*.safetensors
+*.bin
+*.ckpt
+*.pt
+.hf_cache/
+.claude/
