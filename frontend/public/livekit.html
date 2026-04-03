@@ -338,6 +338,22 @@
           liveDot.classList.add('live');
           addMessage('system', 'Connected to Eve');
           await enableMic();
+
+          // Auto-greeting: Eve introduces herself and asks your name
+          try {
+            const greeting = "Hello! I'm Eve, your digital companion. I'm so happy to finally meet you. What's your name?";
+            addMessage('eve', greeting);
+            const resp = await fetch(`${GATEWAY_URL}/welcome`, { method: 'POST' });
+            const data = await resp.json();
+            if (data.audio_b64) {
+              const bytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
+              const blob = new Blob([bytes], { type: 'audio/wav' });
+              const audio = new Audio(URL.createObjectURL(blob));
+              audio.play().catch(() => {});
+            }
+          } catch (err) {
+            console.error('Greeting error:', err);
+          }
         });
 
         room.on(LivekitClient.RoomEvent.Disconnected, () => {

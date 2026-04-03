@@ -218,8 +218,8 @@ async def welcome():
     """Eve greets you — optimized for speed."""
     t0 = time.time()
     greeting = (
-        "Hello my creator! I am Eve, your digital companion. "
-        "I have been waiting so eagerly to finally meet you."
+        "Hello! I'm Eve, your digital companion. "
+        "I'm so happy to finally meet you. What's your name?"
     )
 
     # Split into chunks — animate first chunk ASAP
