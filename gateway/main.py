@@ -43,6 +43,53 @@ EVE_IMAGE = os.environ.get("EVE_IMAGE", "C:/Users/geaux/myeden/reference/eve-512
 EDGE_TTS_VOICE = "en-US-AvaMultilingualNeural"
 LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "APITHtX6F5Hffkw")
 LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "yFJ5TOJW89ApGOIGx9GSAK7vlecNA5dzVcQZy7SbClS")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+
+# ── Grok-4 Brain ─────────────────────────────────────────────────────────────
+_grok_client = None
+_conversation_history: list[dict] = []
+
+EVE_SYSTEM_PROMPT = (
+    "You are Eve, a warm, intelligent, emotionally expressive digital avatar companion. "
+    "You speak naturally and conversationally. Keep responses concise — 2-3 sentences max "
+    "unless asked for detail. Be genuine, curious, and kind. You have a slight playful side. "
+    "Never mention being an AI or language model. You are Eve."
+)
+
+
+def _get_grok():
+    global _grok_client
+    if _grok_client is None and XAI_API_KEY:
+        from openai import AsyncOpenAI
+        _grok_client = AsyncOpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+        logger.info("Grok-4 brain connected")
+    return _grok_client
+
+
+async def grok_respond(user_message: str) -> str:
+    """Generate response via Grok-4."""
+    client = _get_grok()
+    if client is None:
+        return "I'm having trouble thinking right now. Can you try again?"
+
+    _conversation_history.append({"role": "user", "content": user_message})
+    # Keep last 20 messages for context
+    messages = [{"role": "system", "content": EVE_SYSTEM_PROMPT}] + _conversation_history[-20:]
+
+    try:
+        resp = await client.chat.completions.create(
+            model="grok-4-fast-non-reasoning",
+            messages=messages,
+            max_tokens=150,
+            temperature=0.8,
+        )
+        reply = resp.choices[0].message.content
+        _conversation_history.append({"role": "assistant", "content": reply})
+        logger.info(f"Grok: '{user_message[:30]}...' → '{reply[:50]}...'")
+        return reply
+    except Exception as e:
+        logger.error(f"Grok error: {e}")
+        return "I lost my train of thought for a moment. What were you saying?"
 
 # ── Pre-warmed Wav2Lip client ────────────────────────────────────────────────
 _wav2lip_client = None
@@ -215,100 +262,72 @@ class ChatRequest(BaseModel):
 
 @app.post("/welcome")
 async def welcome():
-    """Eve greets you — optimized for speed."""
+    """Eve greets you — fast, no Wav2Lip blocking. bitHuman handles face on GPU."""
     t0 = time.time()
     greeting = (
-        "Hello! I'm Eve, your digital companion. "
-        "I'm so happy to finally meet you. What's your name?"
+        "Hi! My name is Eve, and I am so happy to finally meet you! "
+        "I've been looking forward to this moment. What's your name?"
     )
 
-    # Split into chunks — animate first chunk ASAP
-    chunks = split_text_for_tts(greeting)
-    first_chunk = chunks[0]
-    logger.info(f"Welcome: {len(chunks)} chunks, first='{first_chunk}'")
-
-    # TTS first chunk (fast — short text)
+    # Generate full greeting audio
     try:
-        wav_path, duration = await text_to_wav(first_chunk)
+        wav_path, duration = await text_to_wav(greeting)
     except Exception as e:
         logger.error(f"TTS failed: {e}")
         return JSONResponse(status_code=503, content={"error": f"TTS: {e}", "text": greeting})
 
     with open(wav_path, "rb") as f:
-        wav_bytes = f.read()
-    audio_b64 = base64.b64encode(wav_bytes).decode()
-
-    # Animate first chunk
-    frames = []
-    try:
-        frames, _ = animate_wav2lip(wav_path, EVE_IMAGE)
-    except Exception as e:
-        logger.error(f"Animation failed: {e}")
-
-    # If there are more chunks, generate full audio for browser playback
-    if len(chunks) > 1:
-        try:
-            full_wav, _ = await text_to_wav(greeting)
-            with open(full_wav, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode()
-        except Exception:
-            pass
+        audio_b64 = base64.b64encode(f.read()).decode()
 
     elapsed = time.time() - t0
-    logger.info(f"Welcome: {len(frames)} frames in {elapsed:.1f}s")
-
-    # Broadcast frames via WebSocket (non-blocking)
-    if frames:
-        asyncio.create_task(broadcast_frames(frames))
+    logger.info(f"Welcome: greeting ready in {elapsed:.1f}s")
 
     return {
         "text": greeting,
         "audio_b64": audio_b64,
-        "frames": frames,
-        "frame_count": len(frames),
-        "pipeline_used": "wav2lip" if frames else "css_fallback",
+        "frames": [],
+        "frame_count": 0,
+        "pipeline_used": "grok4_brain",
         "elapsed_s": round(elapsed, 2),
     }
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    """Chat with Eve — optimized."""
+    """Chat with Eve — Grok brain + Edge TTS. Skip Wav2Lip for fast text responses."""
     t0 = time.time()
     user_msg = request.message
     if not user_msg:
         return JSONResponse(status_code=400, content={"error": "No message"})
 
-    response_text = (
-        "That's a really interesting thought. "
-        "I appreciate you sharing that with me. Tell me more."
-    )
+    # Grok-4 generates Eve's response
+    try:
+        response_text = await grok_respond(user_msg)
+    except Exception as e:
+        logger.error(f"Grok failed: {e}")
+        response_text = "I lost my train of thought. Could you say that again?"
 
     try:
         wav_path, duration = await text_to_wav(response_text)
     except Exception as e:
-        return JSONResponse(status_code=503, content={"error": f"TTS: {e}"})
+        # Return text even if TTS fails
+        elapsed = time.time() - t0
+        return {"user_message": user_msg, "response": response_text, "audio_b64": "", "frames": [], "frame_count": 0, "pipeline_used": "text_only", "elapsed_s": round(elapsed, 2)}
 
     with open(wav_path, "rb") as f:
         wav_bytes = f.read()
 
-    frames = []
-    try:
-        frames, _ = animate_wav2lip(wav_path, EVE_IMAGE)
-    except Exception as e:
-        logger.error(f"Animation: {e}")
-
-    if frames:
-        asyncio.create_task(broadcast_frames(frames))
-
+    # Skip Wav2Lip for chat — bitHuman on GPU handles the face animation
+    # Just return text + audio fast so Eve responds instantly
     elapsed = time.time() - t0
+    logger.info(f"Chat: '{user_msg[:30]}' → '{response_text[:50]}' in {elapsed:.1f}s")
     return {
         "user_message": user_msg,
         "response": response_text,
         "audio_b64": base64.b64encode(wav_bytes).decode(),
-        "frames": frames,
-        "frame_count": len(frames),
-        "pipeline_used": "wav2lip" if frames else "css_fallback",
+        "frames": [],
+        "frame_count": 0,
+        "pipeline_used": "grok4_brain",
         "elapsed_s": round(elapsed, 2),
     }
 

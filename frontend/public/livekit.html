@@ -217,7 +217,6 @@
       <p>bitHuman Neural Avatar | LiveKit WebRTC</p>
     </div>
     <div class="chat-messages" id="messages">
-      <div class="msg system">Eve is waking up...</div>
     </div>
     <div class="chat-input">
       <input type="text" id="chat-input" placeholder="Talk to Eve..."
@@ -231,6 +230,7 @@
     const GATEWAY_URL = 'http://localhost:8000';
     let room = null;
     let micEnabled = false;
+    let thinkingDiv = null;
 
     // ── Chat ────────────────────────────────────────────────
     function addMessage(role, text) {
@@ -242,7 +242,7 @@
       sender.className = 'sender';
       sender.textContent = role === 'eve' ? 'Eve' : role === 'user' ? 'You' : '';
 
-      if (role !== 'system') div.appendChild(sender);
+      if (role !== 'system' && role !== 'thinking') div.appendChild(sender);
       const body = document.createElement('div');
       body.textContent = text;
       div.appendChild(body);
@@ -255,40 +255,18 @@
     async function sendText() {
       const input = document.getElementById('chat-input');
       const text = input.value.trim();
-      if (!text) return;
+      if (!text || !room) return;
 
       input.value = '';
       addMessage('user', text);
 
       // Show thinking indicator
-      const thinking = addMessage('thinking', 'Eve is thinking...');
+      thinkingDiv = addMessage('thinking', 'Eve is thinking...');
 
-      try {
-        const resp = await fetch(`${GATEWAY_URL}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
-        });
-        const data = await resp.json();
-
-        // Remove thinking indicator
-        thinking.remove();
-
-        if (data.response) {
-          addMessage('eve', data.response);
-        }
-
-        // Play audio if available
-        if (data.audio_b64) {
-          const bytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
-          const blob = new Blob([bytes], { type: 'audio/wav' });
-          const audio = new Audio(URL.createObjectURL(blob));
-          audio.play().catch(() => {});
-        }
-      } catch (err) {
-        thinking.remove();
-        addMessage('system', `Error: ${err.message}`);
-      }
+      // Send via LiveKit data channel — GPU agent handles Grok + TTS + lip sync
+      const payload = JSON.stringify({ type: 'chat', text: text });
+      const encoder = new TextEncoder();
+      room.localParticipant.publishData(encoder.encode(payload), { reliable: true });
     }
 
     // ── LiveKit ─────────────────────────────────────────────
@@ -316,6 +294,8 @@
         });
 
         room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+          // Only subscribe to remote participants (Eve), never our own tracks
+          if (participant.identity === room.localParticipant.identity) return;
           if (track.kind === 'video') {
             const el = track.attach();
             el.style.width = '100%';
@@ -325,7 +305,9 @@
             container.appendChild(el);
           }
           if (track.kind === 'audio') {
-            document.body.appendChild(track.attach());
+            const el = track.attach();
+            el.style.display = 'none';
+            document.body.appendChild(el);
           }
         });
 
@@ -333,27 +315,29 @@
           track.detach().forEach(el => el.remove());
         });
 
+        // Receive Eve's text responses via data channel
+        room.on(LivekitClient.RoomEvent.DataReceived, (data, participant) => {
+          try {
+            const decoder = new TextDecoder();
+            const msg = JSON.parse(decoder.decode(data));
+            if (msg.type === 'eve_response' && msg.text) {
+              // Remove thinking indicator
+              if (thinkingDiv) {
+                thinkingDiv.remove();
+                thinkingDiv = null;
+              }
+              addMessage('eve', msg.text);
+            }
+          } catch (e) {
+            console.error('Data channel parse error:', e);
+          }
+        });
+
         room.on(LivekitClient.RoomEvent.Connected, async () => {
           statusText.textContent = 'Eve is live';
           liveDot.classList.add('live');
-          addMessage('system', 'Connected to Eve');
-          await enableMic();
-
-          // Auto-greeting: Eve introduces herself and asks your name
-          try {
-            const greeting = "Hello! I'm Eve, your digital companion. I'm so happy to finally meet you. What's your name?";
-            addMessage('eve', greeting);
-            const resp = await fetch(`${GATEWAY_URL}/welcome`, { method: 'POST' });
-            const data = await resp.json();
-            if (data.audio_b64) {
-              const bytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
-              const blob = new Blob([bytes], { type: 'audio/wav' });
-              const audio = new Audio(URL.createObjectURL(blob));
-              audio.play().catch(() => {});
-            }
-          } catch (err) {
-            console.error('Greeting error:', err);
-          }
+          // Mic starts OFF — user clicks mic button to enable
+          document.getElementById('mic-label').textContent = 'Click to talk';
         });
 
         room.on(LivekitClient.RoomEvent.Disconnected, () => {
@@ -377,10 +361,8 @@
         micEnabled = true;
         document.getElementById('mic-btn').classList.add('active');
         document.getElementById('mic-label').textContent = 'Mic live';
-        addMessage('system', 'Mic enabled — talk to Eve');
       } catch (err) {
         document.getElementById('mic-label').textContent = 'Mic denied';
-        addMessage('system', 'Mic access denied');
       }
     }
 
