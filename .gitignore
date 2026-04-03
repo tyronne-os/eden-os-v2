@@ -12,3 +12,4 @@ models/
 *.pt
 .hf_cache/
 .claude/
+*.imx
