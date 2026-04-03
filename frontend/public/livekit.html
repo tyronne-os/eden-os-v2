@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EVE — LiveKit Stream</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    h1 {
+      font-size: 3rem;
+      font-weight: 200;
+      letter-spacing: 0.5em;
+      color: #a78bfa;
+      margin-bottom: 1rem;
+      text-shadow: 0 0 30px rgba(167,139,250,0.3);
+    }
+    .status {
+      color: #666;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+    .status.connected { color: #22c55e; }
+    .status.error { color: #ef4444; }
+    #video-container {
+      width: 520px;
+      height: 520px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid rgba(167,139,250,0.3);
+      box-shadow: 0 0 60px rgba(167,139,250,0.15);
+      background: #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #video-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .controls {
+      margin-top: 1.5rem;
+      display: flex;
+      gap: 1rem;
+    }
+    button {
+      background: #4c1d95;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.8rem 2rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #5b21b6; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .info {
+      margin-top: 1rem;
+      font-size: 0.75rem;
+      color: #444;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>E V E</h1>
+  <div id="status" class="status">Click Connect to see Eve live</div>
+  <div id="video-container">
+    <span style="color:#444">Waiting for stream...</span>
+  </div>
+  <div class="controls">
+    <button id="connect-btn" onclick="connectToEve()">Connect</button>
+    <button id="disconnect-btn" onclick="disconnect()" disabled>Disconnect</button>
+  </div>
+  <div class="info">
+    LiveKit WebRTC | Eve Avatar | EDEN OS V2
+  </div>
+
+  <script>
+    const LIVEKIT_URL = 'wss://tall-cotton-nvhnfg10.livekit.cloud';
+    let room = null;
+
+    async function getToken() {
+      // Fetch token from our gateway
+      const resp = await fetch('/api/livekit-token');
+      const data = await resp.json();
+      return data.token;
+    }
+
+    async function connectToEve() {
+      const statusEl = document.getElementById('status');
+      const container = document.getElementById('video-container');
+      statusEl.textContent = 'Connecting to LiveKit...';
+      statusEl.className = 'status';
+
+      try {
+        // Get viewer token from gateway
+        let token;
+        try {
+          token = await getToken();
+        } catch {
+          // Fallback: generate token client-side (for testing only)
+          statusEl.textContent = 'Getting token from gateway...';
+          const resp = await fetch('http://localhost:8000/livekit-token');
+          const data = await resp.json();
+          token = data.token;
+        }
+
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // Handle track subscriptions
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          console.log('Track subscribed:', track.kind, participant.identity);
+          if (track.kind === 'video') {
+            const videoEl = track.attach();
+            videoEl.style.width = '100%';
+            videoEl.style.height = '100%';
+            videoEl.style.objectFit = 'cover';
+            container.innerHTML = '';
+            container.appendChild(videoEl);
+          }
+          if (track.kind === 'audio') {
+            const audioEl = track.attach();
+            document.body.appendChild(audioEl);
+          }
+        });
+
+        room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+          track.detach().forEach(el => el.remove());
+        });
+
+        room.on(LivekitClient.RoomEvent.Connected, () => {
+          statusEl.textContent = 'Connected — Eve is streaming live';
+          statusEl.className = 'status connected';
+          document.getElementById('connect-btn').disabled = true;
+          document.getElementById('disconnect-btn').disabled = false;
+        });
+
+        room.on(LivekitClient.RoomEvent.Disconnected, () => {
+          statusEl.textContent = 'Disconnected';
+          statusEl.className = 'status';
+          document.getElementById('connect-btn').disabled = false;
+          document.getElementById('disconnect-btn').disabled = true;
+          container.innerHTML = '<span style="color:#444">Stream ended</span>';
+        });
+
+        room.on(LivekitClient.RoomEvent.ParticipantConnected, (participant) => {
+          console.log('Participant joined:', participant.identity);
+          if (participant.identity === 'eve-avatar') {
+            statusEl.textContent = 'Eve has joined — streaming...';
+          }
+        });
+
+        await room.connect(LIVEKIT_URL, token);
+
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+        statusEl.className = 'status error';
+        console.error('Connection error:', err);
+      }
+    }
+
+    function disconnect() {
+      if (room) {
+        room.disconnect();
+        room = null;
+      }
+    }
+  </script>
+</body>
+</html>

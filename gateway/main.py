@@ -41,6 +41,8 @@ app.add_middleware(
 # ── Config ───────────────────────────────────────────────────────────────────
 EVE_IMAGE = os.environ.get("EVE_IMAGE", "C:/Users/geaux/myeden/reference/eve-512.png")
 EDGE_TTS_VOICE = "en-US-AvaMultilingualNeural"
+LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "APITHtX6F5Hffkw")
+LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "yFJ5TOJW89ApGOIGx9GSAK7vlecNA5dzVcQZy7SbClS")
 
 # ── Pre-warmed Wav2Lip client ────────────────────────────────────────────────
 _wav2lip_client = None
@@ -158,6 +160,22 @@ def split_text_for_tts(text: str, max_chars: int = 80) -> list[str]:
     if current:
         chunks.append(current.strip())
     return chunks if chunks else [text]
+
+
+# ── LiveKit Token Endpoint ───────────────────────────────────────────────────
+@app.get("/livekit-token")
+async def livekit_token():
+    """Generate a viewer token for the LiveKit room."""
+    from livekit import api as lk_api
+
+    token = (
+        lk_api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+        .with_identity(f"viewer-{int(time.time())}")
+        .with_name("Viewer")
+        .with_grants(lk_api.VideoGrants(room_join=True, room="eden-room"))
+        .to_jwt()
+    )
+    return {"token": token}
 
 
 # ── WebSocket connections ────────────────────────────────────────────────────
