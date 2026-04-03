@@ -11,35 +11,30 @@
       background: #0a0a0f;
       color: #e0e0e0;
       font-family: system-ui, sans-serif;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      grid-template-rows: 1fr;
+      overflow: hidden;
+    }
+
+    /* Left: Eve video */
+    .video-panel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
-      padding: 20px;
+      justify-content: center;
+      background: #0a0a0f;
+      position: relative;
     }
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 200;
-      letter-spacing: 0.5em;
-      color: #a78bfa;
-      margin-bottom: 0.5rem;
-      text-shadow: 0 0 30px rgba(167,139,250,0.3);
-    }
-    .status {
-      color: #666;
-      margin-bottom: 1rem;
-      font-size: 0.85rem;
-    }
-    .status.connected { color: #22c55e; }
-    .status.error { color: #ef4444; }
-    .status.mic-on { color: #a78bfa; }
     #video-container {
-      width: 560px;
-      height: 560px;
+      width: 100%;
+      max-width: 600px;
+      aspect-ratio: 1;
       border-radius: 12px;
       overflow: hidden;
-      border: 2px solid rgba(167,139,250,0.3);
-      box-shadow: 0 0 60px rgba(167,139,250,0.15);
+      border: 2px solid rgba(167,139,250,0.2);
+      box-shadow: 0 0 80px rgba(167,139,250,0.1);
       background: #111;
       display: flex;
       align-items: center;
@@ -50,111 +45,262 @@
       height: 100%;
       object-fit: cover;
     }
-    .controls {
-      margin-top: 1rem;
+    .video-status {
+      position: absolute;
+      top: 16px;
+      left: 16px;
       display: flex;
-      gap: 0.8rem;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: #666;
+      background: rgba(0,0,0,0.6);
+      padding: 6px 12px;
+      border-radius: 20px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+    .dot.live { background: #22c55e; animation: blink 2s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .mic-controls {
+      position: absolute;
+      bottom: 20px;
+      display: flex;
+      gap: 12px;
       align-items: center;
     }
-    button {
+    .mic-btn {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      border: none;
       background: #4c1d95;
       color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 0.7rem 1.5rem;
-      font-size: 0.9rem;
+      font-size: 1.4rem;
       cursor: pointer;
       transition: all 0.2s;
     }
-    button:hover { background: #5b21b6; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-    button.mic-active {
-      background: #dc2626;
-      animation: pulse 1.5s infinite;
-    }
-    button.mic-btn {
-      border-radius: 50%;
-      width: 56px;
-      height: 56px;
-      font-size: 1.4rem;
-      padding: 0;
-    }
+    .mic-btn:hover { background: #5b21b6; transform: scale(1.05); }
+    .mic-btn.active { background: #dc2626; animation: pulse 1.5s infinite; }
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
-      50% { box-shadow: 0 0 0 12px rgba(220,38,38,0); }
+      0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
+      50% { box-shadow: 0 0 0 14px rgba(220,38,38,0); }
     }
-    .chat-box {
-      margin-top: 1rem;
-      width: 560px;
+    .mic-label { font-size: 0.75rem; color: #888; }
+
+    /* Right: Chat panel */
+    .chat-panel {
       display: flex;
-      gap: 0.5rem;
+      flex-direction: column;
+      background: #111118;
+      border-left: 1px solid #222;
     }
-    .chat-box input {
+    .chat-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #222;
+      text-align: center;
+    }
+    .chat-header h2 {
+      font-size: 1.3rem;
+      font-weight: 200;
+      letter-spacing: 0.3em;
+      color: #a78bfa;
+    }
+    .chat-header p {
+      font-size: 0.7rem;
+      color: #555;
+      margin-top: 4px;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    .msg {
+      padding: 10px 14px;
+      border-radius: 12px;
+      max-width: 90%;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+    .msg.eve {
+      background: linear-gradient(135deg, #1e1b4b, #2a1a4e);
+      align-self: flex-start;
+      border: 1px solid #312e81;
+      color: #c4b5fd;
+    }
+    .msg.eve .sender { color: #a78bfa; font-size: 0.7rem; font-weight: 600; margin-bottom: 4px; }
+    .msg.user {
+      background: #1f2937;
+      align-self: flex-end;
+      border: 1px solid #374151;
+      color: #d1d5db;
+    }
+    .msg.user .sender { color: #9ca3af; font-size: 0.7rem; font-weight: 600; margin-bottom: 4px; text-align: right; }
+    .msg.system {
+      background: transparent;
+      align-self: center;
+      color: #555;
+      font-size: 0.75rem;
+      padding: 4px;
+    }
+    .msg.thinking {
+      background: linear-gradient(135deg, #1e1b4b, #2a1a4e);
+      align-self: flex-start;
+      border: 1px solid #312e81;
+      color: #7c6fc4;
+      font-style: italic;
+    }
+
+    .chat-input {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid #222;
+      background: #0d0d14;
+    }
+    .chat-input input {
       flex: 1;
       background: #1a1a24;
       border: 1px solid #333;
       border-radius: 8px;
-      padding: 0.6rem 1rem;
+      padding: 10px 14px;
       color: #e0e0e0;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       outline: none;
     }
-    .chat-box input:focus { border-color: #a78bfa; }
-    .info {
-      margin-top: 0.8rem;
-      font-size: 0.7rem;
-      color: #444;
-      text-align: center;
+    .chat-input input:focus { border-color: #a78bfa; }
+    .chat-input button {
+      background: #4c1d95;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: background 0.2s;
     }
-    .mic-indicator {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #666;
-      margin-right: 6px;
-    }
-    .mic-indicator.active { background: #22c55e; animation: pulse 1s infinite; }
+    .chat-input button:hover { background: #5b21b6; }
+    .chat-input button:disabled { opacity: 0.4; cursor: not-allowed; }
   </style>
 </head>
 <body>
-  <h1>E V E</h1>
-  <div id="status" class="status">Connecting...</div>
-  <div id="video-container">
-    <span style="color:#444">Waiting for stream...</span>
+
+  <!-- Left: Eve video -->
+  <div class="video-panel">
+    <div class="video-status">
+      <span class="dot" id="live-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+    <div id="video-container">
+      <span style="color:#444">Waiting for stream...</span>
+    </div>
+    <div class="mic-controls">
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+      <span class="mic-label" id="mic-label">Mic off</span>
+    </div>
   </div>
-  <div class="controls">
-    <button id="mic-btn" class="mic-btn" onclick="toggleMic()" title="Hold to talk">🎤</button>
-    <button id="disconnect-btn" onclick="disconnect()" disabled>Disconnect</button>
-    <span id="mic-status" style="font-size:0.8rem;color:#666;">
-      <span class="mic-indicator" id="mic-dot"></span>Mic off
-    </span>
-  </div>
-  <div class="chat-box">
-    <input type="text" id="chat-input" placeholder="Type to Eve..." onkeydown="if(event.key==='Enter')sendText()">
-    <button onclick="sendText()">Send</button>
-  </div>
-  <div class="info">
-    LiveKit WebRTC | bitHuman Neural Render | EDEN OS V2
+
+  <!-- Right: Chat -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <h2>E V E</h2>
+      <p>bitHuman Neural Avatar | LiveKit WebRTC</p>
+    </div>
+    <div class="chat-messages" id="messages">
+      <div class="msg system">Eve is waking up...</div>
+    </div>
+    <div class="chat-input">
+      <input type="text" id="chat-input" placeholder="Talk to Eve..."
+             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendText()}">
+      <button id="send-btn" onclick="sendText()">Send</button>
+    </div>
   </div>
 
   <script>
     const LIVEKIT_URL = 'wss://tall-cotton-nvhnfg10.livekit.cloud';
+    const GATEWAY_URL = 'http://localhost:8000';
     let room = null;
     let micEnabled = false;
-    let localAudioTrack = null;
 
+    // ── Chat ────────────────────────────────────────────────
+    function addMessage(role, text) {
+      const container = document.getElementById('messages');
+      const div = document.createElement('div');
+      div.className = `msg ${role}`;
+
+      const sender = document.createElement('div');
+      sender.className = 'sender';
+      sender.textContent = role === 'eve' ? 'Eve' : role === 'user' ? 'You' : '';
+
+      if (role !== 'system') div.appendChild(sender);
+      const body = document.createElement('div');
+      body.textContent = text;
+      div.appendChild(body);
+
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+      return div;
+    }
+
+    async function sendText() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      addMessage('user', text);
+
+      // Show thinking indicator
+      const thinking = addMessage('thinking', 'Eve is thinking...');
+
+      try {
+        const resp = await fetch(`${GATEWAY_URL}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = await resp.json();
+
+        // Remove thinking indicator
+        thinking.remove();
+
+        if (data.response) {
+          addMessage('eve', data.response);
+        }
+
+        // Play audio if available
+        if (data.audio_b64) {
+          const bytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
+          const blob = new Blob([bytes], { type: 'audio/wav' });
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.play().catch(() => {});
+        }
+      } catch (err) {
+        thinking.remove();
+        addMessage('system', `Error: ${err.message}`);
+      }
+    }
+
+    // ── LiveKit ─────────────────────────────────────────────
     async function getToken() {
-      const resp = await fetch('http://localhost:8000/livekit-token');
-      const data = await resp.json();
-      return data.token;
+      const resp = await fetch(`${GATEWAY_URL}/livekit-token`);
+      return (await resp.json()).token;
     }
 
     async function connectToEve() {
-      const statusEl = document.getElementById('status');
+      const statusText = document.getElementById('status-text');
+      const liveDot = document.getElementById('live-dot');
       const container = document.getElementById('video-container');
-      statusEl.textContent = 'Connecting to Eve...';
-      statusEl.className = 'status';
 
       try {
         const token = await getToken();
@@ -170,7 +316,6 @@
         });
 
         room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
-          console.log('Track:', track.kind, participant.identity);
           if (track.kind === 'video') {
             const el = track.attach();
             el.style.width = '100%';
@@ -180,8 +325,7 @@
             container.appendChild(el);
           }
           if (track.kind === 'audio') {
-            const el = track.attach();
-            document.body.appendChild(el);
+            document.body.appendChild(track.attach());
           }
         });
 
@@ -189,28 +333,24 @@
           track.detach().forEach(el => el.remove());
         });
 
-        room.on(LivekitClient.RoomEvent.Connected, () => {
-          statusEl.textContent = 'Connected — Eve is live';
-          statusEl.className = 'status connected';
-          document.getElementById('disconnect-btn').disabled = false;
+        room.on(LivekitClient.RoomEvent.Connected, async () => {
+          statusText.textContent = 'Eve is live';
+          liveDot.classList.add('live');
+          addMessage('system', 'Connected to Eve');
+          await enableMic();
         });
 
         room.on(LivekitClient.RoomEvent.Disconnected, () => {
-          statusEl.textContent = 'Disconnected';
-          statusEl.className = 'status';
-          document.getElementById('disconnect-btn').disabled = true;
-          container.innerHTML = '<span style="color:#444">Stream ended</span>';
+          statusText.textContent = 'Disconnected';
+          liveDot.classList.remove('live');
+          addMessage('system', 'Disconnected');
         });
 
         await room.connect(LIVEKIT_URL, token);
 
-        // Auto-enable mic after connecting
-        await enableMic();
-
       } catch (err) {
-        statusEl.textContent = `Error: ${err.message}`;
-        statusEl.className = 'status error';
-        console.error(err);
+        statusText.textContent = `Error: ${err.message}`;
+        addMessage('system', `Connection error: ${err.message}`);
       }
     }
 
@@ -219,17 +359,12 @@
       try {
         await room.localParticipant.setMicrophoneEnabled(true);
         micEnabled = true;
-        document.getElementById('mic-btn').classList.add('mic-active');
-        document.getElementById('mic-dot').classList.add('active');
-        document.getElementById('mic-status').innerHTML =
-          '<span class="mic-indicator active" id="mic-dot"></span>Mic live';
-        document.getElementById('status').textContent = 'Connected — Mic ON — Talk to Eve';
-        document.getElementById('status').className = 'status mic-on';
-        console.log('Mic enabled');
+        document.getElementById('mic-btn').classList.add('active');
+        document.getElementById('mic-label').textContent = 'Mic live';
+        addMessage('system', 'Mic enabled — talk to Eve');
       } catch (err) {
-        console.error('Mic error:', err);
-        document.getElementById('mic-status').innerHTML =
-          '<span class="mic-indicator" id="mic-dot"></span>Mic denied';
+        document.getElementById('mic-label').textContent = 'Mic denied';
+        addMessage('system', 'Mic access denied');
       }
     }
 
@@ -238,45 +373,15 @@
       if (micEnabled) {
         await room.localParticipant.setMicrophoneEnabled(false);
         micEnabled = false;
-        document.getElementById('mic-btn').classList.remove('mic-active');
-        document.getElementById('mic-dot').classList.remove('active');
-        document.getElementById('mic-status').innerHTML =
-          '<span class="mic-indicator" id="mic-dot"></span>Mic off';
-        document.getElementById('status').textContent = 'Connected — Mic OFF';
-        document.getElementById('status').className = 'status connected';
+        document.getElementById('mic-btn').classList.remove('active');
+        document.getElementById('mic-label').textContent = 'Mic off';
       } else {
         await enableMic();
       }
     }
 
-    function sendText() {
-      const input = document.getElementById('chat-input');
-      const text = input.value.trim();
-      if (!text || !room) return;
-
-      // Send text via LiveKit data channel
-      const encoder = new TextEncoder();
-      room.localParticipant.publishData(encoder.encode(JSON.stringify({
-        type: 'chat',
-        text: text
-      })), { reliable: true });
-
-      input.value = '';
-      console.log('Sent:', text);
-    }
-
-    function disconnect() {
-      if (room) {
-        room.disconnect();
-        room = null;
-        micEnabled = false;
-      }
-    }
-
-    // AUTO-CONNECT + AUTO-MIC on load
-    window.addEventListener('load', () => {
-      setTimeout(connectToEve, 300);
-    });
+    // Auto-connect
+    window.addEventListener('load', () => setTimeout(connectToEve, 300));
   </script>
 </body>
 </html>
