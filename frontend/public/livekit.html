@@ -93,8 +93,8 @@
     let room = null;
 
     async function getToken() {
-      // Fetch token from our gateway
-      const resp = await fetch('/api/livekit-token');
+      // Try gateway directly
+      const resp = await fetch('http://localhost:8000/livekit-token');
       const data = await resp.json();
       return data.token;
     }
@@ -106,17 +106,8 @@
       statusEl.className = 'status';
 
       try {
-        // Get viewer token from gateway
-        let token;
-        try {
-          token = await getToken();
-        } catch {
-          // Fallback: generate token client-side (for testing only)
-          statusEl.textContent = 'Getting token from gateway...';
-          const resp = await fetch('http://localhost:8000/livekit-token');
-          const data = await resp.json();
-          token = data.token;
-        }
+        const token = await getToken();
+        statusEl.textContent = 'Token received, joining room...';
 
         room = new LivekitClient.Room({
           adaptiveStream: true,
@@ -181,6 +172,11 @@
         room = null;
       }
     }
+
+    // AUTO-CONNECT on page load — Eve is alive immediately
+    window.addEventListener('load', () => {
+      setTimeout(connectToEve, 500);
+    });
   </script>
 </body>
 </html>
